@@ -9,15 +9,18 @@
 
 typedef struct Ingrediente {
     char nome_ingrediente[255];
-    int quantita;
+    u_int32_t quantita;
+    u_int32_t hash;
     struct Ingrediente *next;
 } Ingrediente;
 
 typedef struct Ricetta {
     char nome_ricetta[255];
     Ingrediente *ingredienti; // lista concatenata di ingredienti
+    u_int32_t peso; //somma dei grammi dei singoli ingredienti
+    u_int32_t hash;
     struct Ricetta *next; // Per la lista concatenata di ricette
-    int peso; //somma dei grammi dei singoli ingredienti
+
 } Ricetta;
 
 typedef struct {
@@ -26,17 +29,17 @@ typedef struct {
 
 typedef struct Lotto {
     char *nome_ingrediente;
-    int quantita;
-    int data_scadenza;
+    u_int32_t quantita;
+    u_int32_t data_scadenza;
     struct Lotto *next;
 } Lotto;
 
 typedef struct Ordine {
-    int istante_arrivo;
-    int quantita; //quantità di quella ricetta
+    u_int32_t istante_arrivo;
+    u_int32_t quantita; //quantità di quella ricetta
     Ricetta ricetta;
     struct Ordine *next;
-    int peso; // somma degli ingredienti della ricetta * quantità
+    u_int32_t peso; // somma degli ingredienti della ricetta * quantità
 } Ordine;
 
 typedef struct {
@@ -124,6 +127,8 @@ void aggiungiIngredienteAllaRicetta(Ricetta *ricetta, char *nome_ingrediente, in
     nuovo_ingrediente->nome_ingrediente[sizeof(nuovo_ingrediente->nome_ingrediente) - 1] = '\0';
     //imposto la quantità
     nuovo_ingrediente->quantita = quantita;
+    //imposto l'hash
+    nuovo_ingrediente->hash = hash_ingrediente(nome_ingrediente);
 
 
     //aggiungo l'ingrediente alla lista concatenata
@@ -189,10 +194,8 @@ void aggiungiLottoAlMagazzino(char *nome_ingrediente, int quantita, int data_sca
 
 //aggiungo la ricetta al catalogo
 void aggiungiRicettaAlCatalogo(Ricetta *nuova_ricetta) {
-    int hash = hash_ricetta(nuova_ricetta->nome_ricetta);
-
     // Cerca se la ricetta è già presente nella lista concatenata all'indice hash
-    Ricetta *ricetta = catalogo.ricette[hash];
+    Ricetta *ricetta = catalogo.ricette[nuova_ricetta->hash];
     while (ricetta != NULL) {
         if (strcmp(nuova_ricetta->nome_ricetta, ricetta->nome_ricetta) == 0) {
             // Ricetta già presente, non aggiungere
@@ -203,8 +206,8 @@ void aggiungiRicettaAlCatalogo(Ricetta *nuova_ricetta) {
     }
 
     // Se non trovata, aggiungi la nuova ricetta
-    nuova_ricetta->next = catalogo.ricette[hash];
-    catalogo.ricette[hash] = nuova_ricetta;
+    nuova_ricetta->next = catalogo.ricette[nuova_ricetta->hash];
+    catalogo.ricette[nuova_ricetta->hash] = nuova_ricetta;
     printf("aggiunta\n");
 }
 
@@ -239,6 +242,7 @@ void inizializzaRicetta(Ricetta *r, char *nome_ricetta) {
     r->next = NULL;
     r->peso = 0;
     r->ingredienti = NULL;
+    r->hash = hash_ricetta(nome_ricetta);
 }
 
 void inizializzaCatalogo() {
@@ -356,15 +360,15 @@ void stampaCamion() {
 
 
 //restituisce il lotto con la scadenza minore di uno specifico ingrediente
-int trovaLottiNecessariPerIngrediente(Lotto **listalotti, char *nome_ingrediente, int quantita_necessaria) {
+int trovaLottiNecessariPerIngrediente(Lotto **listalotti, Ingrediente *ingrediente, int quantita_necessaria) {
     int tot_trovato = 0;
-    int hash = hash_ingrediente(nome_ingrediente);
-    Lotto *lotto_magazzino = magazzino.lotti[hash];
+    Lotto *lotto_magazzino = magazzino.lotti[ingrediente->hash];
     if (lotto_magazzino == NULL) {
         return 0;
     }
     while (lotto_magazzino != NULL && tot_trovato < quantita_necessaria) {
-        if (strcmp(lotto_magazzino->nome_ingrediente, nome_ingrediente) == 0) {
+        if (strcmp(lotto_magazzino->nome_ingrediente, ingrediente->nome_ingrediente) == 0) {
+
             //1. se la quantità del lotto è maggiore o uguale alla quantità necessaria
             if (lotto_magazzino->quantita >= quantita_necessaria-tot_trovato) {
                 Lotto *nuovo_lotto = malloc(sizeof(Lotto));
@@ -609,8 +613,7 @@ void gestioneOrdini(Ordine *ordine) {
         int quantita = ordine->quantita; //quantità di dolci di quella ricetta
 
         //CERCO I LOTTI NECESSARI, SE RAGGIUNGO LA QUANTITA RICHIESTA MI FERMO
-        int y = trovaLottiNecessariPerIngrediente(&lotti, ingrediente->nome_ingrediente,
-                                                  quantita * ingrediente->quantita);
+        int y = trovaLottiNecessariPerIngrediente(&lotti, ingrediente, quantita * ingrediente->quantita);
         if (y == 0) {
             tutti_gli_ingredienti_presenti = 0;
             break;

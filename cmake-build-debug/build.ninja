@@ -51,7 +51,7 @@ build cmake_object_order_depends_target_Progetto_API: phony || .
 
 build CMakeFiles/Progetto_API.dir/main.c.o: C_COMPILER__Progetto_API_unscanned_Debug /home/elisabetta/CLionProjects/Progetto_API/main.c || cmake_object_order_depends_target_Progetto_API
   DEP_FILE = CMakeFiles/Progetto_API.dir/main.c.o.d
-  FLAGS = -fsanitize=address -std=gnu11 -lm -Wall -g -std=gnu11 -fdiagnostics-color=always
+  FLAGS = -std=gnu11 -lm -Wall -g -std=gnu11 -fdiagnostics-color=always
   OBJECT_DIR = CMakeFiles/Progetto_API.dir
   OBJECT_FILE_DIR = CMakeFiles/Progetto_API.dir
 
@@ -64,7 +64,7 @@ build CMakeFiles/Progetto_API.dir/main.c.o: C_COMPILER__Progetto_API_unscanned_D
 # Link the executable Progetto_API
 
 build Progetto_API: C_EXECUTABLE_LINKER__Progetto_API_Debug CMakeFiles/Progetto_API.dir/main.c.o
-  FLAGS = -fsanitize=address -std=gnu11 -lm -Wall -g
+  FLAGS = -std=gnu11 -lm -Wall -g
   OBJECT_DIR = CMakeFiles/Progetto_API.dir
   POST_BUILD = :
   PRE_LINK = :
