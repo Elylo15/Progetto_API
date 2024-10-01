@@ -1,9 +1,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdint.h>
+#include <stdbool.h>
 
 
 #define TABELLA_SIZE 10
+
 typedef struct Ingrediente {
     char nome_ingrediente[255];
     int quantita;
@@ -44,8 +47,8 @@ typedef struct {
 
 
 typedef struct {
-    int capienza_camion;
-    int periodicita;
+    u_int32_t capienza_camion;
+    u_int32_t periodicita;
     Ordine *ordini;
 } Corriere;
 
@@ -53,6 +56,10 @@ typedef struct {
 Catalogo catalogo;
 Corriere corriere;
 Magazzino magazzino;
+unsigned int contatore_linee = 0;
+
+//mettere unsigned per diminuire lo spazio
+//per le strut usare packed per diminuire lo spazio
 
 
 //FUNZIONE DI HASH
@@ -231,7 +238,7 @@ void inizializzaRicetta(Ricetta *r, char *nome_ricetta) {
     r->nome_ricetta[sizeof(r->nome_ricetta) - 1] = '\0';
     r->next = NULL;
     r->peso = 0;
-    r->ingredienti=NULL;
+    r->ingredienti = NULL;
 }
 
 void inizializzaCatalogo() {
@@ -258,27 +265,45 @@ void inizializzaCorriere() {
 void liberaIngredientiDiUnaRicetta(Ricetta *r) {
     if (r == NULL)
         return;
-    for (int i = 0; i < TABELLA_SIZE; i++) {
-        //scorro tutta la tabella hash
-        Ingrediente *ingrediente = r->ingredienti;
-        while (ingrediente != NULL) {
-            //scorro tutta la lista concatenata di ingredienti
-            Ingrediente *temp = ingrediente; //salvo il puntatore all'ingrediente corrente
-            ingrediente = ingrediente->next; //passo all'ingrediente successivo
-            free(temp); //libero la memoria dell'ingrediente corrente
-        }
+
+    Ingrediente *ingrediente = r->ingredienti;
+    while (ingrediente != NULL) {
+        //scorro tutta la lista concatenata di ingredienti
+        Ingrediente *temp = ingrediente; //salvo il puntatore all'ingrediente corrente
+        ingrediente = ingrediente->next; //passo all'ingrediente successivo
+        free(temp); //libero la memoria dell'ingrediente corrente
     }
+
     r->ingredienti = NULL;
 }
-//cerca una ricetta
+
+//cerca una ricetta all' interno di un odine in magazzino
 int cercaRicetta(char *nome) {
-    Ricetta *current = catalogo.ricette[hash_ricetta(nome)];
-    while (current != NULL) {
-        if (strcmp(current->nome_ricetta, nome) == 0)
-            return 1; //se è già presente
-        current = current->next;
+    int hash = hash_ricetta(nome);
+    Ricetta *ricetta = catalogo.ricette[hash];
+    Ordine *ordini_attesa = magazzino.ordini_attesa;
+    Ordine *ordini_pronti = magazzino.ordini_pronti;
+
+
+    while (ricetta != NULL) {
+        if (strcmp(ricetta->nome_ricetta, nome) == 0) {
+            while (ordini_attesa != NULL) {
+                if (strcmp(ordini_attesa->ricetta.nome_ricetta, nome) == 0) {
+                    return 1; //questa ricetta è in
+                }
+                ordini_attesa = ordini_attesa->next;
+            }
+            while (ordini_pronti != NULL) {
+                if (strcmp(ordini_pronti->ricetta.nome_ricetta, nome) == 0) {
+                    return 1; //questa ricetta è in
+                }
+                ordini_pronti = ordini_pronti->next;
+            }
+        }
+
+        ricetta = ricetta->next;
     }
-    return 0; //se non è presente
+    return 0; //se la ricetta non è usata ne dagli ordini pronti che in attesa
 }
 
 //rimuove una ricetta dal catalogo
@@ -289,7 +314,7 @@ void rimuoviRicetta(char *nome_ricetta) {
     Ricetta *ricetta = catalogo.ricette[hash];
     Ricetta *ricetta_prec = NULL;
     while (ricetta != NULL) {
-        if(cercaRicetta(nome_ricetta)==1) {
+        if (cercaRicetta(nome_ricetta) == 1) {
             printf("ordini in sospeso\n");
             return;
         }
@@ -304,7 +329,7 @@ void rimuoviRicetta(char *nome_ricetta) {
             }
             liberaIngredientiDiUnaRicetta(ricetta);
             free(ricetta);
-            printf("rimosso\n");
+            printf("rimossa\n");
             return;
         }
         ricetta_prec = ricetta;
@@ -341,7 +366,7 @@ int trovaLottiNecessariPerIngrediente(Lotto **listalotti, char *nome_ingrediente
     while (lotto_magazzino != NULL && tot_trovato < quantita_necessaria) {
         if (strcmp(lotto_magazzino->nome_ingrediente, nome_ingrediente) == 0) {
             //1. se la quantità del lotto è maggiore o uguale alla quantità necessaria
-            if (lotto_magazzino->quantita >= quantita_necessaria) {
+            if (lotto_magazzino->quantita >= quantita_necessaria-tot_trovato) {
                 Lotto *nuovo_lotto = malloc(sizeof(Lotto));
                 if (nuovo_lotto == NULL) {
                     fprintf(stderr, "Errore di allocazione della memoria!\n");
@@ -416,14 +441,19 @@ void aggiungiOrdineInPronto(Ordine *ordine) {
     if (magazzino.ordini_pronti == NULL) {
         magazzino.ordini_pronti = nuovo;
     } else {
-        // Trova il punto giusto nella lista concatenata per inserire il nuovo ordine
         Ordine *current = magazzino.ordini_pronti;
-        while (current->next != NULL && current->next->istante_arrivo <= nuovo->istante_arrivo) {
-            current = current->next;
+        //se il primo ha un istante di arrivo maggiore di quello da aggiungere
+        if (magazzino.ordini_pronti->istante_arrivo > nuovo->istante_arrivo) {
+            nuovo->next = magazzino.ordini_pronti;
+            magazzino.ordini_pronti = nuovo;
+        } else {
+            while (current->next != NULL && current->next->istante_arrivo <= nuovo->istante_arrivo) {
+                current = current->next;
+            }
+            // Inserisci il nuovo ordine nella posizione corretta
+            nuovo->next = current->next;
+            current->next = nuovo;
         }
-        // Inserisci il nuovo ordine nella posizione corretta
-        nuovo->next = current->next;
-        current->next = nuovo;
     }
 }
 
@@ -460,21 +490,17 @@ void eliminaLotti(Lotto *listalotti) {
         while (lotto != NULL) {
             if (strcmp(lotto->nome_ingrediente, current->nome_ingrediente) == 0 && lotto->data_scadenza == current->
                 data_scadenza) {
-                if (prec_lotto == NULL) {
-                    //se il lotto da eliminare è il primo della lista
-                    if (current->quantita == 0) {
-                        //se la quantità è 0 elimino il lotto
+                if (current->quantita == 0) {
+                    //se la quantità è 0 elimino il lotto
+                    if (prec_lotto == NULL) {
                         magazzino.lotti[hash] = lotto->next;
-                        free(lotto);
-                    } else
-                        lotto->quantita = current->quantita; //altrimenti aggiorno la quantità
-                } else {
-                    if (current->quantita == 0) {
-                        //se la quantità è 0 elimino il lotto
+                    } else {
                         prec_lotto->next = lotto->next;
-                        free(lotto);
-                    } else
-                        lotto->quantita = current->quantita; //altrimenti aggiorno la quantità
+                    }
+                    free(lotto);
+                } else { //quantità diversa da 0
+                    //altrimenti aggiorno la quantità
+                    lotto->quantita = current->quantita;
                 }
                 break;
             }
@@ -482,6 +508,28 @@ void eliminaLotti(Lotto *listalotti) {
             lotto = lotto->next;
         }
         current = current->next;
+    }
+}
+
+//elimina i lotti scaduti
+void eliminaLottiScaduti() {
+    for (int i = 0; i < TABELLA_SIZE; i++) {
+        Lotto *current = magazzino.lotti[i];
+        Lotto *prec = NULL;
+        while (current != NULL) {
+            if (current->data_scadenza <= contatore_linee) {
+                if (prec == NULL) {
+                    //se il lotto da eliminare è il primo della lista
+                    magazzino.lotti[i] = magazzino.lotti[i]->next;
+                } else {
+                    //se il lotto da eliminare è in mezzo alla lista
+                    prec->next = current->next;
+                }
+                //free(current);
+            }
+            prec = current;
+            current = current->next;
+        }
     }
 }
 
@@ -520,6 +568,7 @@ void eliminaOrdinePronto(Ordine *ordine) {
     }
 }
 
+//elimina ordine dalla lista degli ordini attesa
 void eliminaOrdineAttesa(Ordine *ordine) {
     Ordine *current = magazzino.ordini_attesa;
     Ordine *prec = NULL;
@@ -544,9 +593,10 @@ void eliminaOrdineAttesa(Ordine *ordine) {
 }
 
 
-
 //decide se bisogna mettere l' ordine nella lista di attesa o di pronto nel magazzino
 void gestioneOrdini(Ordine *ordine) {
+    //ELIMINO I LOTTI CHE SONO SCADUTO
+    eliminaLottiScaduti();
     //VERIFICO SE L'ORDINE PUO' ESSERE PREPARATO
     int n_ingredienti = 0, n_lotti = 0;
     int tutti_gli_ingredienti_presenti = 1;
@@ -585,11 +635,12 @@ void caricaCamion() {
     int peso_camion = 0;
     while (ordine_pronto != NULL) {
         //aggiungi l'ordine al camion se c'è spazio
-        if ((corriere.capienza_camion-peso_camion)>=ordine_pronto->peso) {
+        if ((corriere.capienza_camion - peso_camion) >= ordine_pronto->peso) {
             peso_camion += ordine_pronto->peso;
             aggiungiOrdineAlCorriere(ordine_pronto);
             eliminaOrdinePronto(ordine_pronto);
-        }
+        } else
+            break;
         ordine_pronto = ordine_pronto->next;
     }
 }
@@ -621,173 +672,177 @@ int main(void) {
     inizializzaMagazzino();
 
 
-    int contatore_linee = -1;
-
     // Variabili per la gestione della lettura
     char *line = NULL;
     size_t len = 0;
+
+    getline(&line, &len, stdin);
+
+    // Tokenizza la stringa
+    char *token = strtok(line, " ");
+
+    //CALCOLO PERIODICITA E CAPIENZA CAMION
+    if (token != NULL) {
+        corriere.periodicita = atoi(token);
+        token = strtok(NULL, " ");
+    } else {
+        fprintf(stderr, "Manca la periodicita \n");
+        free(line);
+    }
+    if (token != NULL) {
+        corriere.capienza_camion = atoi(token);
+    } else {
+        fprintf(stderr, "Manca la capienza \n");
+        free(line);
+    }
+
 
     // Legge lo standard input riga per riga
     while (getline(&line, &len, stdin) != -1) {
         rimuoviNewLine(line);
 
-        // Tokenizza la stringa
-        char *token = strtok(line, " ");
+        token = strtok(line, " ");
+
         //STAMPA CAMIONCINO ogni k-periodicita
-        //CALCOLO PERIODICITA E CAPIENZA CAMION
-        if (contatore_linee == -1) {
-            if (token != NULL) {
-                corriere.periodicita = atoi(token);
-                token = strtok(NULL, " ");
-            } else {
-                fprintf(stderr, "Manca la periodicita \n");
-                free(line);
-                continue;
-            }
-            if (token != NULL) {
-                corriere.capienza_camion = atoi(token);
-            } else {
-                fprintf(stderr, "Manca la capienza \n");
-                free(line);
-                continue;
-            }
-        } else {
+        if (contatore_linee % corriere.periodicita == 0 && contatore_linee != 0) {
+            caricaCamion();
+            stampaCamion();
+            scaricaMerce();
+        }
 
-            if (contatore_linee % corriere.periodicita == 0 && contatore_linee!=0) {
-                caricaCamion();
-                stampaCamion();
-                scaricaMerce();
-            }
+        if (token != NULL) {
+            //AGGIUNGI RICETTA
+            if (strcmp(token, "aggiungi_ricetta") == 0) {
+                Ricetta *nuova_ricetta = malloc(sizeof(Ricetta));
 
-            if (token != NULL) {
-                //AGGIUNGI RICETTA
-                if (strcmp(token, "aggiungi_ricetta") == 0) {
-                    Ricetta *nuova_ricetta = malloc(sizeof(Ricetta));
-
-                    if (nuova_ricetta == NULL) {
-                        fprintf(stderr, "Errore di allocazione della memoria per la ricetta!\n");
-                        free(line);
-                        exit(EXIT_FAILURE);
-                    }
-
-                    token = strtok(NULL, " "); // Nome ricetta
-                    if (token != NULL) {
-                        inizializzaRicetta(nuova_ricetta, token);
-                    } else {
-                        fprintf(stderr, "Nome ricetta mancante\n");
-                        free(nuova_ricetta);
-                        free(line);
-                        continue;
-                    }
-
-                    while ((token = strtok(NULL, " ")) != NULL) {
-                        char nome_ingrediente[255];
-                        int quantita_ingrediente;
-
-                        //salva il nome dell'ingrediente
-                        strncpy(nome_ingrediente, token, sizeof(nome_ingrediente));
-                        nome_ingrediente[sizeof(nome_ingrediente) - 1] = '\0';
-
-                        //salva la quantità dell'ingrediente
-                        token = strtok(NULL, " ");
-                        if (token != NULL) {
-                            quantita_ingrediente = atoi(token);
-                        } else {
-                            fprintf(stderr, "Quantità ingrediente mancante\n");
-                            continue;
-                        }
-                        aggiungiIngredienteAllaRicetta(nuova_ricetta, nome_ingrediente, quantita_ingrediente);
-                    }
-
-                    aggiungiRicettaAlCatalogo(nuova_ricetta);
+                if (nuova_ricetta == NULL) {
+                    fprintf(stderr, "Errore di allocazione della memoria per la ricetta!\n");
+                    free(line);
+                    exit(EXIT_FAILURE);
                 }
 
-                //RIMUOVI RICETTA
-                else if (strcmp(token, "rimuovi_ricetta") == 0) {
-                    token = strtok(NULL, " ");
-                    if (token != NULL) {
-                        rimuoviRicetta(token);
-                    }
-                }
-
-                //RIFORNIMENTO (AGGIUNGI LOTTO)
-                else if (strcmp(token, "rifornimento") == 0) {
-                    while ((token = strtok(NULL, " ")) != NULL) {
-                        char nome_ingrediente[255];
-                        int quantita_ingrediente;
-                        int data_scadenza;
-
-                        //salva il nome dell'ingrediente
-                        strncpy(nome_ingrediente, token, sizeof(nome_ingrediente));
-                        nome_ingrediente[sizeof(nome_ingrediente) - 1] = '\0';
-
-                        //salva la quantità dell'ingrediente
-                        token = strtok(NULL, " ");
-                        if (token != NULL) {
-                            quantita_ingrediente = atoi(token);
-                        } else {
-                            fprintf(stderr, "Quantità ingrediente mancante\n");
-                            continue;
-                        }
-                        //salva la data di scadenza dell'ingrediente
-                        token = strtok(NULL, " ");
-                        if (token != NULL) {
-                            data_scadenza = atoi(token);
-                        } else {
-                            fprintf(stderr, "Data di scadenza mancante\n");
-                            continue;
-                        }
-                        aggiungiLottoAlMagazzino(nome_ingrediente, quantita_ingrediente, data_scadenza);
-
-                        //verifico se posso soddisfare gli ordini in attesa
-                        if (magazzino.ordini_attesa != NULL) {
-                            Ordine *lista = magazzino.ordini_attesa;
-                            while (lista != NULL) {
-                                Ordine *next = lista->next;
-                                gestioneOrdini(lista);
-                                lista = next;
-                            }
-                        }
-                    }
-                    printf("rifornito\n");
-                }
-
-                //ORDINE
-                else if (strcmp(token, "ordine") == 0) {
-                    Ordine *nuovo_ordine = malloc(sizeof(Ordine));
-
-                    //salva nome ricetta
-                    char nome_ricetta[255];
-                    token = strtok(NULL, " ");
-                    if (token != NULL) {
-                        strncpy(nome_ricetta, token, sizeof(nome_ricetta));
-                        nome_ricetta[sizeof(nome_ricetta) - 1] = '\0';
-                    } else {
-                        fprintf(stderr, "Nome ricetta mancante\n");
-                        free(nuovo_ordine);
-                        free(line);
-                        continue;
-                    }
-                    //salva quantita
-                    int quantita;
-                    token = strtok(NULL, " ");
-                    if (token != NULL) {
-                        quantita = atoi(token);
-                    } else {
-                        fprintf(stderr, "Quantità mancante\n");
-                        free(nuovo_ordine);
-                        free(line);
-                        continue;
-                    }
-                    nuovo_ordine = creaOrdine(nome_ricetta, quantita, contatore_linee);
-                    if (nuovo_ordine != NULL)
-                        gestioneOrdini(nuovo_ordine);
+                token = strtok(NULL, " "); // Nome ricetta
+                if (token != NULL) {
+                    inizializzaRicetta(nuova_ricetta, token);
                 } else {
-                    printf("Comando non riconosciuto\n");
+                    fprintf(stderr, "Nome ricetta mancante\n");
+                    free(nuova_ricetta);
+                    free(line);
+                    continue;
                 }
+
+                while ((token = strtok(NULL, " ")) != NULL) {
+                    char nome_ingrediente[255];
+                    int quantita_ingrediente;
+
+                    //salva il nome dell'ingrediente
+                    strncpy(nome_ingrediente, token, sizeof(nome_ingrediente));
+                    nome_ingrediente[sizeof(nome_ingrediente) - 1] = '\0';
+
+                    //salva la quantità dell'ingrediente
+                    token = strtok(NULL, " ");
+                    if (token != NULL) {
+                        quantita_ingrediente = atoi(token);
+                    } else {
+                        fprintf(stderr, "Quantità ingrediente mancante\n");
+                        continue;
+                    }
+                    aggiungiIngredienteAllaRicetta(nuova_ricetta, nome_ingrediente, quantita_ingrediente);
+                }
+
+                aggiungiRicettaAlCatalogo(nuova_ricetta);
+            }
+
+            //RIMUOVI RICETTA
+            else if (strcmp(token, "rimuovi_ricetta") == 0) {
+                token = strtok(NULL, " ");
+                if (token != NULL) {
+                    rimuoviRicetta(token);
+                }
+            }
+
+            //RIFORNIMENTO (AGGIUNGI LOTTO)
+            else if (strcmp(token, "rifornimento") == 0) {
+                while ((token = strtok(NULL, " ")) != NULL) {
+                    char nome_ingrediente[255];
+                    int quantita_ingrediente;
+                    int data_scadenza;
+
+                    //salva il nome dell'ingrediente
+                    strncpy(nome_ingrediente, token, sizeof(nome_ingrediente));
+                    nome_ingrediente[sizeof(nome_ingrediente) - 1] = '\0';
+
+                    //salva la quantità dell'ingrediente
+                    token = strtok(NULL, " ");
+                    if (token != NULL) {
+                        quantita_ingrediente = atoi(token);
+                    } else {
+                        fprintf(stderr, "Quantità ingrediente mancante\n");
+                        continue;
+                    }
+                    //salva la data di scadenza dell'ingrediente
+                    token = strtok(NULL, " ");
+                    if (token != NULL) {
+                        data_scadenza = atoi(token);
+                    } else {
+                        fprintf(stderr, "Data di scadenza mancante\n");
+                        continue;
+                    }
+                    aggiungiLottoAlMagazzino(nome_ingrediente, quantita_ingrediente, data_scadenza);
+                }
+                printf("rifornito\n");
+                //verifico se posso soddisfare gli ordini in attesa
+                if (magazzino.ordini_attesa != NULL) {
+                    Ordine *lista = magazzino.ordini_attesa;
+                    while (lista != NULL) {
+                        Ordine *next = lista->next;
+                        gestioneOrdini(lista);
+                        lista = next;
+                    }
+                }
+            }
+
+            //ORDINE
+            else if (strcmp(token, "ordine") == 0) {
+                Ordine *nuovo_ordine = malloc(sizeof(Ordine));
+
+                //salva nome ricetta
+                char nome_ricetta[255];
+                token = strtok(NULL, " ");
+                if (token != NULL) {
+                    strncpy(nome_ricetta, token, sizeof(nome_ricetta));
+                    nome_ricetta[sizeof(nome_ricetta) - 1] = '\0';
+                } else {
+                    fprintf(stderr, "Nome ricetta mancante\n");
+                    free(nuovo_ordine);
+                    free(line);
+                    continue;
+                }
+                //salva quantita
+                int quantita;
+                token = strtok(NULL, " ");
+                if (token != NULL) {
+                    quantita = atoi(token);
+                } else {
+                    fprintf(stderr, "Quantità mancante\n");
+                    free(nuovo_ordine);
+                    free(line);
+                    continue;
+                }
+                nuovo_ordine = creaOrdine(nome_ricetta, quantita, contatore_linee);
+                if (nuovo_ordine != NULL)
+                    gestioneOrdini(nuovo_ordine);
+            } else {
+                printf("Comando non riconosciuto\n");
             }
         }
         contatore_linee++;
+    }
+    //STAMPA CAMIONCINO ogni k-periodicita
+    if (contatore_linee % corriere.periodicita == 0 && contatore_linee != 0) {
+        caricaCamion();
+        stampaCamion();
+        scaricaMerce();
     }
     free(line);
     //fai la free del magazzino, catalogo e corriere
