@@ -5,7 +5,7 @@
 #include <stdbool.h>
 
 
-#define TABELLA_SIZE 10
+#define TABELLA_SIZE 10007
 
 typedef struct Ingrediente {
     char nome_ingrediente[255];
@@ -28,7 +28,7 @@ typedef struct {
 } Catalogo;
 
 typedef struct Lotto {
-    char *nome_ingrediente;
+    char nome_ingrediente[255];
     u_int32_t quantita;
     u_int32_t data_scadenza;
     struct Lotto *next;
@@ -42,8 +42,13 @@ typedef struct Ordine {
     u_int32_t peso; // somma degli ingredienti della ricetta * quantità
 } Ordine;
 
+typedef struct ListaLotti {
+    Lotto *lottiElemento;
+    struct ListaLotti *next;
+} ListaLotti;
+
 typedef struct {
-    Lotto *lotti[TABELLA_SIZE];
+    ListaLotti *lotti[TABELLA_SIZE];
     Ordine *ordini_attesa; //lista concatenata di ordini in attesa
     Ordine *ordini_pronti; //lista concatenata di ordini pronti
 } Magazzino;
@@ -60,6 +65,7 @@ Catalogo catalogo;
 Corriere corriere;
 Magazzino magazzino;
 unsigned int contatore_linee = 0;
+Ordine *ultimo_ordine_attesa = NULL;
 
 //mettere unsigned per diminuire lo spazio
 //per le strut usare packed per diminuire lo spazio
@@ -139,57 +145,66 @@ void aggiungiIngredienteAllaRicetta(Ricetta *ricetta, char *nome_ingrediente, in
 
 //creo il lotto e lo aggiungo al magazzino in ordine di data di scadenza
 void aggiungiLottoAlMagazzino(char *nome_ingrediente, int quantita, int data_scadenza) {
-    int hash = hash_ingrediente(nome_ingrediente);
+    u_int32_t hash = hash_ingrediente(nome_ingrediente);
+
+    //CREA NUOVO LOTTO
     Lotto *nuovo_lotto = malloc(sizeof(Lotto));
     if (nuovo_lotto == NULL) {
-        fprintf(stderr, "Errore di allocazione della memoria!\n");
+        fprintf(stderr, "Errore di allocazione delula memoria!\n");
         exit(EXIT_FAILURE);
     }
-    //CREA NUOVO LOTTO
-    //copio il nome dell'ingrediente
-    // Allocate memory for nome_ingrediente
-    nuovo_lotto->nome_ingrediente = malloc(255 * sizeof(char));
-    if (nuovo_lotto->nome_ingrediente == NULL) {
-        fprintf(stderr, "Errore di allocazione della memoria!\n");
-        exit(EXIT_FAILURE);
-    }
-
-    // Copy the string and ensure null-termination
     strncpy(nuovo_lotto->nome_ingrediente, nome_ingrediente, 254);
     nuovo_lotto->nome_ingrediente[254] = '\0';
     nuovo_lotto->quantita = quantita;
-    //imposto la data di scadenza
     nuovo_lotto->data_scadenza = data_scadenza;
     nuovo_lotto->next = NULL;
 
     //aggiungo il lotto all'array di lotti in base alla data di scadenza
-    Lotto *current = magazzino.lotti[hash];
-    Lotto *prec = NULL;
+    ListaLotti *current = magazzino.lotti[hash];
     while (current != NULL) {
-        if (current->data_scadenza > data_scadenza) {
-            if (prec == NULL) {
-                nuovo_lotto->next = current;
-                magazzino.lotti[hash] = nuovo_lotto;
-            } else {
-                prec->next = nuovo_lotto;
-                nuovo_lotto->next = current;
+        if(strcmp(current->lottiElemento->nome_ingrediente, nome_ingrediente)==0) {//se è già presente un lotto di quell'ingrediente
+
+            //vado dentro alla lista di quel ingrediente
+            Lotto *lottoIngrediente = current->lottiElemento;
+            Lotto *prec = NULL;
+
+            while (lottoIngrediente!=NULL) {
+                if(lottoIngrediente->data_scadenza> data_scadenza){
+                    if (prec == NULL) {
+                        //se il lotto da aggiungere va all'inizio
+                        nuovo_lotto->next = lottoIngrediente;
+                        current->lottiElemento = nuovo_lotto;
+                    } else {
+                        //se il lotto da aggiungere è in mezzo alla lista
+                        prec->next = nuovo_lotto;
+                        nuovo_lotto->next = lottoIngrediente;
+                    }
+                    return;
+                }
+                if (lottoIngrediente->data_scadenza == data_scadenza) {
+                    lottoIngrediente->quantita += quantita;
+                    free(nuovo_lotto);
+                    return;
+                }
+                prec = lottoIngrediente;
+                lottoIngrediente = lottoIngrediente->next;
             }
-            break;
+            // Se arriva alla fine della lista senza trovare una data maggiore
+            prec->next = nuovo_lotto;
+            return;
         }
-        if (current->data_scadenza == data_scadenza && strcmp(current->nome_ingrediente, nome_ingrediente) == 0) {
-            current->quantita += quantita;
-            break;
-        }
-        prec = current;
         current = current->next;
     }
-    if (current == NULL) {
-        if (prec == NULL) {
-            magazzino.lotti[hash] = nuovo_lotto;
-        } else {
-            prec->next = nuovo_lotto;
-        }
+
+    // Se non esiste una lista per questo ingrediente, crea una nuova ListaLotti
+    ListaLotti *nuovo = malloc(sizeof(ListaLotti));
+    if (nuovo == NULL) {
+        fprintf(stderr, "Errore di allocazione della memoria!\n");
+        exit(EXIT_FAILURE);
     }
+    nuovo->lottiElemento = nuovo_lotto;
+    nuovo->next = magazzino.lotti[hash];
+    magazzino.lotti[hash] = nuovo;
 }
 
 //aggiungo la ricetta al catalogo
@@ -212,7 +227,7 @@ void aggiungiRicettaAlCatalogo(Ricetta *nuova_ricetta) {
 }
 
 //creo un ordine
-Ordine *creaOrdine(char *nome_ricetta, int quantita, int istante_arrivo) {
+Ordine *creaOrdine(char *nome_ricetta, int quantita) {
     //cerca la ricetta nel catalogo
     Ordine *ordine = malloc(sizeof(Ordine));
     int hash = hash_ricetta(nome_ricetta);
@@ -221,7 +236,7 @@ Ordine *creaOrdine(char *nome_ricetta, int quantita, int istante_arrivo) {
         if (strcmp(nome_ricetta, ricetta->nome_ricetta) == 0) {
             ordine->ricetta = *ricetta;
             ordine->quantita = quantita;
-            ordine->istante_arrivo = istante_arrivo;
+            ordine->istante_arrivo = contatore_linee;
             ordine->peso = quantita * ricetta->peso;
             ordine->next = NULL;
             fflush(stdout);
@@ -358,105 +373,26 @@ void stampaCamion() {
     }
 }
 
-
-//restituisce il lotto con la scadenza minore di uno specifico ingrediente
-int trovaLottiNecessariPerIngrediente(Lotto **listalotti, Ingrediente *ingrediente, int quantita_necessaria) {
-    int tot_trovato = 0;
-    Lotto *lotto_magazzino = magazzino.lotti[ingrediente->hash];
-    if (lotto_magazzino == NULL) {
-        return 0;
-    }
-    while (lotto_magazzino != NULL && tot_trovato < quantita_necessaria) {
-        if (strcmp(lotto_magazzino->nome_ingrediente, ingrediente->nome_ingrediente) == 0) {
-
-            //1. se la quantità del lotto è maggiore o uguale alla quantità necessaria
-            if (lotto_magazzino->quantita >= quantita_necessaria-tot_trovato) {
-                Lotto *nuovo_lotto = malloc(sizeof(Lotto));
-                if (nuovo_lotto == NULL) {
-                    fprintf(stderr, "Errore di allocazione della memoria!\n");
-                    exit(EXIT_FAILURE);
-                }
-                nuovo_lotto->nome_ingrediente = lotto_magazzino->nome_ingrediente;
-                nuovo_lotto->quantita = lotto_magazzino->quantita - quantita_necessaria + tot_trovato;
-                nuovo_lotto->data_scadenza = lotto_magazzino->data_scadenza;
-                if (*listalotti == NULL) {
-                    nuovo_lotto->next = NULL;
-                    *listalotti = nuovo_lotto;
-                } else {
-                    nuovo_lotto->next = *listalotti;
-                    *listalotti = nuovo_lotto;
-                }
-                tot_trovato += quantita_necessaria - tot_trovato;
-            } else {
-                //2. se la quantità del lotto è minore della quantità necessaria
-                Lotto *nuovo_lotto = malloc(sizeof(Lotto));
-                if (nuovo_lotto == NULL) {
-                    fprintf(stderr, "Errore di allocazione della memoria!\n");
-                    exit(EXIT_FAILURE);
-                }
-                nuovo_lotto->nome_ingrediente = lotto_magazzino->nome_ingrediente;
-                nuovo_lotto->quantita = 0;
-                nuovo_lotto->data_scadenza = lotto_magazzino->data_scadenza;
-                if (*listalotti == NULL) {
-                    nuovo_lotto->next = NULL;
-                    *listalotti = nuovo_lotto;
-                } else {
-                    nuovo_lotto->next = *listalotti;
-                    *listalotti = nuovo_lotto;
-                }
-                tot_trovato += lotto_magazzino->quantita;
-            }
-        }
-        lotto_magazzino = lotto_magazzino->next;
-    }
-    if (tot_trovato == quantita_necessaria) {
-        return 1;
-    }
-    return 0;
-}
-
-//aggiungo in lista di attesa un ordine a seconda dell' istante di arrivo
-void aggiungiOrdineInAttesa(Ordine *ordine) {
-    Ordine *nuovo = malloc(sizeof(Ordine));
-    memcpy(nuovo, ordine, sizeof(Ordine));
-    nuovo->next = NULL;
-    // Se la lista è vuota o se l'ordine deve essere inserito all'inizio
-    if (magazzino.ordini_attesa == NULL) {
-        magazzino.ordini_attesa = nuovo;
-    } else {
-        // Trova il punto giusto nella lista concatenata per inserire il nuovo ordine
-        Ordine *current = magazzino.ordini_attesa;
-        while (current->next != NULL && current->next->istante_arrivo <= nuovo->istante_arrivo) {
-            current = current->next;
-        }
-        // Inserisci il nuovo ordine nella posizione corretta
-        nuovo->next = current->next;
-        current->next = nuovo;
-    }
-}
-
 //aggiungo in lista di pronto un ordine a seconda dell' istante di arrivo
 void aggiungiOrdineInPronto(Ordine *ordine) {
-    Ordine *nuovo = malloc(sizeof(Ordine));
-    memcpy(nuovo, ordine, sizeof(Ordine));
-    nuovo->next = NULL;
+    ordine->next = NULL;
 
     // Se la lista è vuota o se l'ordine deve essere inserito all'inizio
     if (magazzino.ordini_pronti == NULL) {
-        magazzino.ordini_pronti = nuovo;
+        magazzino.ordini_pronti = ordine;
     } else {
         Ordine *current = magazzino.ordini_pronti;
         //se il primo ha un istante di arrivo maggiore di quello da aggiungere
-        if (magazzino.ordini_pronti->istante_arrivo > nuovo->istante_arrivo) {
-            nuovo->next = magazzino.ordini_pronti;
-            magazzino.ordini_pronti = nuovo;
+        if (magazzino.ordini_pronti->istante_arrivo > ordine->istante_arrivo) {
+            ordine->next = magazzino.ordini_pronti;
+            magazzino.ordini_pronti = ordine;
         } else {
-            while (current->next != NULL && current->next->istante_arrivo <= nuovo->istante_arrivo) {
+            while (current->next != NULL && current->next->istante_arrivo <= ordine->istante_arrivo) {
                 current = current->next;
             }
             // Inserisci il nuovo ordine nella posizione corretta
-            nuovo->next = current->next;
-            current->next = nuovo;
+            ordine->next = current->next;
+            current->next = ordine;
         }
     }
 }
@@ -484,62 +420,10 @@ void aggiungiOrdineAlCorriere(Ordine *ordine) {
     }
 }
 
-//elimina/modifica i lotti che appartengono a un ordine che è pronto
-void eliminaLotti(Lotto *listalotti) {
-    Lotto *current = listalotti;
-    while (current != NULL) {
-        int hash = hash_ingrediente(current->nome_ingrediente);
-        Lotto *lotto = magazzino.lotti[hash];
-        Lotto *prec_lotto = NULL;
-        while (lotto != NULL) {
-            if (strcmp(lotto->nome_ingrediente, current->nome_ingrediente) == 0 && lotto->data_scadenza == current->
-                data_scadenza) {
-                if (current->quantita == 0) {
-                    //se la quantità è 0 elimino il lotto
-                    if (prec_lotto == NULL) {
-                        magazzino.lotti[hash] = lotto->next;
-                    } else {
-                        prec_lotto->next = lotto->next;
-                    }
-                    free(lotto);
-                } else { //quantità diversa da 0
-                    //altrimenti aggiorno la quantità
-                    lotto->quantita = current->quantita;
-                }
-                break;
-            }
-            prec_lotto = lotto;
-            lotto = lotto->next;
-        }
-        current = current->next;
-    }
-}
-
-//elimina i lotti scaduti
-void eliminaLottiScaduti() {
-    for (int i = 0; i < TABELLA_SIZE; i++) {
-        Lotto *current = magazzino.lotti[i];
-        Lotto *prec = NULL;
-        while (current != NULL) {
-            if (current->data_scadenza <= contatore_linee) {
-                if (prec == NULL) {
-                    //se il lotto da eliminare è il primo della lista
-                    magazzino.lotti[i] = magazzino.lotti[i]->next;
-                } else {
-                    //se il lotto da eliminare è in mezzo alla lista
-                    prec->next = current->next;
-                }
-                //free(current);
-            }
-            prec = current;
-            current = current->next;
-        }
-    }
-}
 
 //cerca un ordine da una lista concatenata
-int cercaOrdine(Ordine *ordine, Ordine *listaOrdini) {
-    Ordine *current = listaOrdini;
+int cercaOrdineinAttesa(Ordine *ordine) {
+    Ordine *current = magazzino.ordini_attesa;
     while (current != NULL) {
         if (current == ordine)
             return 1; //se è già presente
@@ -582,9 +466,15 @@ void eliminaOrdineAttesa(Ordine *ordine) {
             if (prec == NULL) {
                 //se l'ordine da eliminare è il primo della lista
                 magazzino.ordini_attesa = magazzino.ordini_attesa->next;
+                if (magazzino.ordini_attesa == NULL) {
+                    ultimo_ordine_attesa = NULL;
+                }
             } else {
                 //se l'ordine da eliminare è in mezzo alla lista
                 prec->next = current->next;
+            }
+            if (current->next == NULL) {
+                ultimo_ordine_attesa = prec;
             }
 
             //eliminaRicettaDaOrdine(ordine);
@@ -596,15 +486,123 @@ void eliminaOrdineAttesa(Ordine *ordine) {
     }
 }
 
+//restituisce il lotto con la scadenza minore di uno specifico ingrediente
+int trovaLottiNecessariPerIngrediente(Ingrediente *ingrediente, int quantita_necessaria) {
+    uint32_t tot_trovato = 0;
+    ListaLotti *lottiIngrediente = magazzino.lotti[ingrediente->hash];
+    Lotto *prec = NULL;
+    ListaLotti *precLista = NULL;
 
-//decide se bisogna mettere l' ordine nella lista di attesa o di pronto nel magazzino
-void gestioneOrdini(Ordine *ordine) {
-    //ELIMINO I LOTTI CHE SONO SCADUTO
-    eliminaLottiScaduti();
+    while(lottiIngrediente!=NULL) {
+        if (strcmp(ingrediente->nome_ingrediente, lottiIngrediente->lottiElemento->nome_ingrediente) == 0) {
+            Lotto *lotto_magazzino = lottiIngrediente->lottiElemento;
+
+            while (lotto_magazzino != NULL && tot_trovato < quantita_necessaria) {
+                //ELIMINA LOTTI SCADUTI
+                if (lotto_magazzino->data_scadenza <= contatore_linee) {
+                    if (prec == NULL) {
+                        lottiIngrediente->lottiElemento = lotto_magazzino->next;
+                    } else {
+                        prec->next = lotto_magazzino->next;
+                    }
+                    Lotto *da_eliminare = lotto_magazzino;
+                    lotto_magazzino = lotto_magazzino->next;
+                    free(da_eliminare);
+
+                    // Se non ci sono più lotti, rimuovi l'elemento dalla listaLotti
+                    if (lottiIngrediente->lottiElemento == NULL) {
+                        if (precLista == NULL) {
+                            magazzino.lotti[ingrediente->hash] = lottiIngrediente->next; // Rimuovi l'elemento della listaLotti
+                        } else {
+                            precLista->next = lottiIngrediente->next; // Salta l'elemento
+                        }
+                        //free(lottiIngrediente); // Libera la memoria dell'elemento della listaLotti
+                    }
+                    continue;
+                }
+                if(lotto_magazzino->quantita >= quantita_necessaria-tot_trovato){
+                    return 1;
+                }
+
+                tot_trovato += lotto_magazzino->quantita;
+
+                prec = lotto_magazzino;
+                lotto_magazzino = lotto_magazzino->next;
+            }
+        }
+        precLista = lottiIngrediente;
+        lottiIngrediente = lottiIngrediente->next;
+    }
+    return 0;
+}
+
+//elimina/modifica i lotti che appartengono a un ordine che è pronto
+void eliminaLotti(Ordine *ordine) {
+    Ingrediente *ingrediente = ordine->ricetta.ingredienti;
+
+    // Itera sugli ingredienti della ricetta
+    while (ingrediente != NULL) {
+        ListaLotti *lottiIngrediente = magazzino.lotti[ingrediente->hash];
+        ListaLotti *precLista = NULL;
+
+        // Itera sui lotti dell'ingrediente
+        while (lottiIngrediente != NULL) {
+            if (strcmp(ingrediente->nome_ingrediente, lottiIngrediente->lottiElemento->nome_ingrediente) == 0) {
+                Lotto *lotto_magazzino = lottiIngrediente->lottiElemento;
+                uint32_t quantita_necessaria = ordine->quantita * ingrediente->quantita;
+                uint32_t quantita_trovata = 0;
+
+                // Itera sui lotti per ridurre la quantità necessaria
+                while (lotto_magazzino != NULL && quantita_trovata < quantita_necessaria) {
+                    if (lotto_magazzino->quantita > quantita_necessaria - quantita_trovata) {
+                        // Se la quantità del lotto è sufficiente
+                        lotto_magazzino->quantita -= quantita_necessaria - quantita_trovata;
+                        quantita_trovata = quantita_necessaria;
+                        break;
+                    }
+
+                    // Se la quantità del lotto è insufficiente, prendiamo tutto e lo eliminiamo
+                    quantita_trovata += lotto_magazzino->quantita;
+
+                    Lotto *da_eliminare = lotto_magazzino;
+                    lotto_magazzino = lotto_magazzino->next;
+
+                    lottiIngrediente->lottiElemento = lotto_magazzino;
+
+                    free(da_eliminare);
+                }
+
+                // Se non ci sono più lotti, rimuovi l'elemento della lista
+                if (lottiIngrediente->lottiElemento == NULL) {
+                    if (precLista == NULL) {//se è il primo elemento della lista delle liste
+                        magazzino.lotti[ingrediente->hash] = lottiIngrediente->next;
+                    } else {//se si trova in mezzo alla lista
+                        precLista->next = lottiIngrediente->next;
+                    }
+                    free(lottiIngrediente); // Libera la memoria
+                }
+
+                // Se abbiamo trovato tutta la quantità necessaria, esci
+                if (quantita_necessaria == quantita_trovata) {
+                    break;
+                }
+            }
+
+            // Aggiorna il puntatore precLista solo se stiamo continuando
+            precLista = lottiIngrediente;
+            lottiIngrediente = lottiIngrediente->next; // Passa al lotto successivo
+        }
+
+        // Passa all'ingrediente successivo
+        ingrediente = ingrediente->next;
+    }
+}
+
+//decide se bisogna mettere nuovo ordine nella lista di attesa o di pronto nel magazzino
+void gestioneOrdineNuovo(Ordine *ordine) {
     //VERIFICO SE L'ORDINE PUO' ESSERE PREPARATO
     int n_ingredienti = 0, n_lotti = 0;
     int tutti_gli_ingredienti_presenti = 1;
-    Lotto *lotti = NULL;
     Ingrediente *ingrediente = ordine->ricetta.ingredienti;
 
     while (ingrediente != NULL) {
@@ -613,7 +611,7 @@ void gestioneOrdini(Ordine *ordine) {
         int quantita = ordine->quantita; //quantità di dolci di quella ricetta
 
         //CERCO I LOTTI NECESSARI, SE RAGGIUNGO LA QUANTITA RICHIESTA MI FERMO
-        int y = trovaLottiNecessariPerIngrediente(&lotti, ingrediente, quantita * ingrediente->quantita);
+        int y = trovaLottiNecessariPerIngrediente(ingrediente, quantita * ingrediente->quantita);
         if (y == 0) {
             tutti_gli_ingredienti_presenti = 0;
             break;
@@ -622,26 +620,57 @@ void gestioneOrdini(Ordine *ordine) {
         ingrediente = ingrediente->next;
     }
     if (n_ingredienti == n_lotti && tutti_gli_ingredienti_presenti == 1) {
-        if (cercaOrdine(ordine, magazzino.ordini_attesa) == 1)
-            eliminaOrdineAttesa(ordine);
         aggiungiOrdineInPronto(ordine);
-        eliminaLotti(lotti);
+        eliminaLotti(ordine);
     } else {
-        if (cercaOrdine(ordine, magazzino.ordini_attesa) == 0)
-            aggiungiOrdineInAttesa(ordine);
+        if (magazzino.ordini_attesa == NULL) {
+            magazzino.ordini_attesa = ordine;
+            ultimo_ordine_attesa = ordine;
+        } else {
+            ultimo_ordine_attesa->next = ordine;
+            ultimo_ordine_attesa = ordine;
+        }
+
+    }
+}
+//decide se bisogna mettere un ordine in attesa in pronto
+void gestioneOrdiniInAttesa(Ordine *ordine) {
+    //VERIFICO SE L'ORDINE PUO' ESSERE PREPARATO
+    int n_ingredienti = 0, n_lotti = 0;
+    int tutti_gli_ingredienti_presenti = 1;
+    Ingrediente *ingrediente = ordine->ricetta.ingredienti;
+
+    while (ingrediente != NULL) {
+        //ingrediente che sto cercando
+        n_ingredienti++;
+        int quantita = ordine->quantita; //quantità di dolci di quella ricetta
+
+        //CERCO I LOTTI NECESSARI, SE RAGGIUNGO LA QUANTITA RICHIESTA MI FERMO
+        int y = trovaLottiNecessariPerIngrediente(ingrediente, quantita * ingrediente->quantita);
+        if (y == 0) {
+            tutti_gli_ingredienti_presenti = 0;
+            break;
+        }
+        n_lotti++;
+        ingrediente = ingrediente->next;
+    }
+    if (n_ingredienti == n_lotti && tutti_gli_ingredienti_presenti == 1) {
+        eliminaOrdineAttesa(ordine);
+        aggiungiOrdineInPronto(ordine);
+        eliminaLotti(ordine);
     }
 }
 
 //carico il camion con gli ordini pronti nel magazzino fino a raggiungere la capienza massima possibile
 void caricaCamion() {
     Ordine *ordine_pronto = magazzino.ordini_pronti;
-    int peso_camion = 0;
+    uint32_t peso_camion = 0;
     while (ordine_pronto != NULL) {
         //aggiungi l'ordine al camion se c'è spazio
         if ((corriere.capienza_camion - peso_camion) >= ordine_pronto->peso) {
             peso_camion += ordine_pronto->peso;
-            aggiungiOrdineAlCorriere(ordine_pronto);
             eliminaOrdinePronto(ordine_pronto);
+            aggiungiOrdineAlCorriere(ordine_pronto);
         } else
             break;
         ordine_pronto = ordine_pronto->next;
@@ -799,7 +828,7 @@ int main(void) {
                     Ordine *lista = magazzino.ordini_attesa;
                     while (lista != NULL) {
                         Ordine *next = lista->next;
-                        gestioneOrdini(lista);
+                        gestioneOrdiniInAttesa(lista);
                         lista = next;
                     }
                 }
@@ -832,9 +861,9 @@ int main(void) {
                     free(line);
                     continue;
                 }
-                nuovo_ordine = creaOrdine(nome_ricetta, quantita, contatore_linee);
+                nuovo_ordine = creaOrdine(nome_ricetta, quantita);
                 if (nuovo_ordine != NULL)
-                    gestioneOrdini(nuovo_ordine);
+                    gestioneOrdineNuovo(nuovo_ordine);
             } else {
                 printf("Comando non riconosciuto\n");
             }
