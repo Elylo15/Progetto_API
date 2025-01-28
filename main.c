@@ -2,7 +2,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
-#include <stdbool.h>
 
 
 #define TABELLA_SIZE 10007
@@ -24,7 +23,7 @@ typedef struct Ricetta {
 } Ricetta;
 
 typedef struct {
-    Ricetta *ricette[TABELLA_SIZE];
+   Ricetta *ricette[TABELLA_SIZE];
 } Catalogo;
 
 typedef struct Lotto {
@@ -72,7 +71,7 @@ Ordine *ultimo_ordine_attesa = NULL;
 
 
 //FUNZIONE DI HASH
-unsigned int murmurhash(const char *key, int len) {
+unsigned int murmurhash(const char *key, unsigned int len) {
     const unsigned int seed = 0x5bd1e995;
     unsigned int hash = seed ^ len;
     const unsigned char *data = (const unsigned char *) key;
@@ -190,8 +189,10 @@ void aggiungiLottoAlMagazzino(char *nome_ingrediente, int quantita, int data_sca
                 lottoIngrediente = lottoIngrediente->next;
             }
             // Se arriva alla fine della lista senza trovare una data maggiore
-            prec->next = nuovo_lotto;
-            return;
+            if (prec!=NULL) {
+                prec->next = nuovo_lotto;
+                return;
+            }
         }
         current = current->next;
     }
@@ -230,7 +231,7 @@ void aggiungiRicettaAlCatalogo(Ricetta *nuova_ricetta) {
 Ordine *creaOrdine(char *nome_ricetta, int quantita) {
     //cerca la ricetta nel catalogo
     Ordine *ordine = malloc(sizeof(Ordine));
-    int hash = hash_ricetta(nome_ricetta);
+    unsigned int hash = hash_ricetta(nome_ricetta);
     Ricetta *ricetta = catalogo.ricette[hash];
     while (ricetta != NULL) {
         if (strcmp(nome_ricetta, ricetta->nome_ricetta) == 0) {
@@ -280,25 +281,9 @@ void inizializzaCorriere() {
     corriere.ordini = NULL;
 }
 
-//serve per eliminare gli ingredienti di una ricetta che devo eliminare
-void liberaIngredientiDiUnaRicetta(Ricetta *r) {
-    if (r == NULL)
-        return;
-
-    Ingrediente *ingrediente = r->ingredienti;
-    while (ingrediente != NULL) {
-        //scorro tutta la lista concatenata di ingredienti
-        Ingrediente *temp = ingrediente; //salvo il puntatore all'ingrediente corrente
-        ingrediente = ingrediente->next; //passo all'ingrediente successivo
-        free(temp); //libero la memoria dell'ingrediente corrente
-    }
-
-    r->ingredienti = NULL;
-}
-
 //cerca una ricetta all' interno di un odine in magazzino
 int cercaRicetta(char *nome) {
-    int hash = hash_ricetta(nome);
+    unsigned int hash = hash_ricetta(nome);
     Ricetta *ricetta = catalogo.ricette[hash];
     Ordine *ordini_attesa = magazzino.ordini_attesa;
     Ordine *ordini_pronti = magazzino.ordini_pronti;
@@ -325,9 +310,25 @@ int cercaRicetta(char *nome) {
     return 0; //se la ricetta non è usata ne dagli ordini pronti che in attesa
 }
 
+//serve per eliminare gli ingredienti di una ricetta che devo eliminare
+void liberaIngredientiDiUnaRicetta(Ricetta *r) {
+    if (r == NULL)
+        return;
+
+    Ingrediente *ingrediente = r->ingredienti;
+    while (ingrediente != NULL) {
+        //scorro tutta la lista concatenata di ingredienti
+        Ingrediente *temp = ingrediente; //salvo il puntatore all'ingrediente corrente
+        ingrediente = ingrediente->next; //passo all'ingrediente successivo
+        free(temp); //libero la memoria dell'ingrediente corrente
+    }
+
+    r->ingredienti = NULL;
+}
+
 //rimuove una ricetta dal catalogo
 void rimuoviRicetta(char *nome_ricetta) {
-    int hash = hash_ricetta(nome_ricetta);
+    unsigned int hash = hash_ricetta(nome_ricetta);
 
     // Cerca se la ricetta è presente nella lista concatenata all'indice hash
     Ricetta *ricetta = catalogo.ricette[hash];
@@ -446,9 +447,6 @@ void eliminaOrdinePronto(Ordine *ordine) {
                 //se l'ordine da eliminare è in mezzo alla lista
                 prec->next = current->next;
             }
-
-            //eliminaRicettaDaOrdine(ordine);
-            //free(current);
             return;
         }
         prec = current;
@@ -476,8 +474,6 @@ void eliminaOrdineAttesa(Ordine *ordine) {
             if (current->next == NULL) {
                 ultimo_ordine_attesa = prec;
             }
-
-            //eliminaRicettaDaOrdine(ordine);
             //free(current);
             return;
         }
@@ -487,7 +483,7 @@ void eliminaOrdineAttesa(Ordine *ordine) {
 }
 
 //restituisce il lotto con la scadenza minore di uno specifico ingrediente
-int trovaLottiNecessariPerIngrediente(Ingrediente *ingrediente, int quantita_necessaria) {
+int trovaLottiNecessariPerIngrediente(Ingrediente *ingrediente, unsigned int quantita_necessaria) {
     uint32_t tot_trovato = 0;
     ListaLotti *lottiIngrediente = magazzino.lotti[ingrediente->hash];
     Lotto *prec = NULL;
@@ -500,24 +496,26 @@ int trovaLottiNecessariPerIngrediente(Ingrediente *ingrediente, int quantita_nec
             while (lotto_magazzino != NULL && tot_trovato < quantita_necessaria) {
                 //ELIMINA LOTTI SCADUTI
                 if (lotto_magazzino->data_scadenza <= contatore_linee) {
-                    if (prec == NULL) {
+                    if (prec == NULL) {//se è il primo elemento della lista
                         lottiIngrediente->lottiElemento = lotto_magazzino->next;
-                    } else {
+                    } else {//se si trova in mezzo alla lista
                         prec->next = lotto_magazzino->next;
                     }
                     Lotto *da_eliminare = lotto_magazzino;
                     lotto_magazzino = lotto_magazzino->next;
                     free(da_eliminare);
 
-                    // Se non ci sono più lotti, rimuovi l'elemento dalla listaLotti
+                    // svuoto di la lista per mettere i nuovi lotti
                     if (lottiIngrediente->lottiElemento == NULL) {
                         if (precLista == NULL) {
                             magazzino.lotti[ingrediente->hash] = lottiIngrediente->next; // Rimuovi l'elemento della listaLotti
                         } else {
                             precLista->next = lottiIngrediente->next; // Salta l'elemento
                         }
-                        //free(lottiIngrediente); // Libera la memoria dell'elemento della listaLotti
+                        free(lottiIngrediente); // Libera la memoria dell'elemento della listaLotti
                     }
+                    prec = lotto_magazzino;
+                    lotto_magazzino = lotto_magazzino->next;
                     continue;
                 }
                 if(lotto_magazzino->quantita >= quantita_necessaria-tot_trovato){
@@ -538,26 +536,28 @@ int trovaLottiNecessariPerIngrediente(Ingrediente *ingrediente, int quantita_nec
 
 //elimina/modifica i lotti che appartengono a un ordine che è pronto
 void eliminaLotti(Ordine *ordine) {
+    //lista di ingredienti
     Ingrediente *ingrediente = ordine->ricetta.ingredienti;
 
     // Itera sugli ingredienti della ricetta
     while (ingrediente != NULL) {
+        //lista di lotti di un ingrediente
         ListaLotti *lottiIngrediente = magazzino.lotti[ingrediente->hash];
         ListaLotti *precLista = NULL;
 
         // Itera sui lotti dell'ingrediente
         while (lottiIngrediente != NULL) {
             if (strcmp(ingrediente->nome_ingrediente, lottiIngrediente->lottiElemento->nome_ingrediente) == 0) {
+                //prendo un elemento dei lotti
                 Lotto *lotto_magazzino = lottiIngrediente->lottiElemento;
                 uint32_t quantita_necessaria = ordine->quantita * ingrediente->quantita;
                 uint32_t quantita_trovata = 0;
 
                 // Itera sui lotti per ridurre la quantità necessaria
                 while (lotto_magazzino != NULL && quantita_trovata < quantita_necessaria) {
+                    // Se la quantità del lotto è maggiore o uguale di quella richiesta
                     if (lotto_magazzino->quantita > quantita_necessaria - quantita_trovata) {
-                        // Se la quantità del lotto è sufficiente
                         lotto_magazzino->quantita -= quantita_necessaria - quantita_trovata;
-                        quantita_trovata = quantita_necessaria;
                         break;
                     }
 
@@ -579,15 +579,10 @@ void eliminaLotti(Ordine *ordine) {
                     } else {//se si trova in mezzo alla lista
                         precLista->next = lottiIngrediente->next;
                     }
-                    free(lottiIngrediente); // Libera la memoria
-                }
-
-                // Se abbiamo trovato tutta la quantità necessaria, esci
-                if (quantita_necessaria == quantita_trovata) {
-                    break;
+                    free(lottiIngrediente->lottiElemento);
+                    free(lottiIngrediente);
                 }
             }
-
             // Aggiorna il puntatore precLista solo se stiamo continuando
             precLista = lottiIngrediente;
             lottiIngrediente = lottiIngrediente->next; // Passa al lotto successivo
@@ -608,7 +603,7 @@ void gestioneOrdineNuovo(Ordine *ordine) {
     while (ingrediente != NULL) {
         //ingrediente che sto cercando
         n_ingredienti++;
-        int quantita = ordine->quantita; //quantità di dolci di quella ricetta
+        unsigned int quantita = ordine->quantita; //quantità di dolci di quella ricetta
 
         //CERCO I LOTTI NECESSARI, SE RAGGIUNGO LA QUANTITA RICHIESTA MI FERMO
         int y = trovaLottiNecessariPerIngrediente(ingrediente, quantita * ingrediente->quantita);
@@ -643,7 +638,7 @@ void gestioneOrdiniInAttesa(Ordine *ordine) {
     while (ingrediente != NULL) {
         //ingrediente che sto cercando
         n_ingredienti++;
-        int quantita = ordine->quantita; //quantità di dolci di quella ricetta
+         unsigned int quantita = ordine->quantita; //quantità di dolci di quella ricetta
 
         //CERCO I LOTTI NECESSARI, SE RAGGIUNGO LA QUANTITA RICHIESTA MI FERMO
         int y = trovaLottiNecessariPerIngrediente(ingrediente, quantita * ingrediente->quantita);
@@ -688,7 +683,6 @@ void scaricaMerce() {
     corriere.ordini = NULL;
 }
 
-
 // Rimuove il newline alla fine della stringa e verifica se contiene '\a'
 void rimuoviNewLine(char *line) {
     size_t len = strlen(line);
@@ -708,7 +702,7 @@ int main(void) {
     char *line = NULL;
     size_t len = 0;
 
-    getline(&line, &len, stdin);
+    len = getline(&line, &len, stdin);
 
     // Tokenizza la stringa
     char *token = strtok(line, " ");
@@ -836,7 +830,7 @@ int main(void) {
 
             //ORDINE
             else if (strcmp(token, "ordine") == 0) {
-                Ordine *nuovo_ordine = malloc(sizeof(Ordine));
+                Ordine *nuovo_ordine;
 
                 //salva nome ricetta
                 char nome_ricetta[255];
@@ -844,22 +838,12 @@ int main(void) {
                 if (token != NULL) {
                     strncpy(nome_ricetta, token, sizeof(nome_ricetta));
                     nome_ricetta[sizeof(nome_ricetta) - 1] = '\0';
-                } else {
-                    fprintf(stderr, "Nome ricetta mancante\n");
-                    free(nuovo_ordine);
-                    free(line);
-                    continue;
                 }
                 //salva quantita
                 int quantita;
                 token = strtok(NULL, " ");
                 if (token != NULL) {
                     quantita = atoi(token);
-                } else {
-                    fprintf(stderr, "Quantità mancante\n");
-                    free(nuovo_ordine);
-                    free(line);
-                    continue;
                 }
                 nuovo_ordine = creaOrdine(nome_ricetta, quantita);
                 if (nuovo_ordine != NULL)
@@ -877,6 +861,5 @@ int main(void) {
         scaricaMerce();
     }
     free(line);
-    //fai la free del magazzino, catalogo e corriere
     return 0;
 }
